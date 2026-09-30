@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "outDir": ".test-build",
+    "rootDir": ".",
+    "skipLibCheck": true,
+    "types": ["vite/client", "node"]
+  },
+  "include": ["tests", "src/core", "server/app.ts"]
+}
