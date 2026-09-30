@@ -2,18 +2,18 @@
 
 ## Current state
 
-The application is built and locally tested. GitHub, Vercel and Railway currently require sign-in in the available browser. No remote repository, paid service or production deployment has been created. Existing Auralis projects must not be selected or modified.
+The application is built and locally tested. Source is published to [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app). The user explicitly deferred Vercel and Railway deployment until later. No public application URL, paid service or production deployment has been created. Existing Auralis projects must not be selected or modified.
 
 ## 1. GitHub
 
-Create a new repository named `lunara` in the intended account. Push this project root, including its lockfile. The `.gitignore` excludes tokens/environment files, dependencies and compiled output. Do not reuse an Auralis repository.
+The independent public repository is already created and contains the project root and lockfile. Clone it for further development. The `.gitignore` excludes tokens/environment files, dependencies and compiled output. Do not reuse an Auralis repository.
 
 ```sh
-git remote add origin https://github.com/YOUR-ACCOUNT/lunara.git
-git push -u origin main
+git clone https://github.com/johanstevenz1/lunara-music-app.git
+cd lunara-music-app
 ```
 
-Use your normal authenticated Git/GitHub workflow. Do not paste tokens into README files or shell history.
+Use your normal authenticated Git/GitHub workflow to publish subsequent changes. Do not paste tokens into README files or shell history.
 
 ## 2. Create the Vercel frontend project
 

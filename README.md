@@ -4,8 +4,8 @@ A responsive music application for the TypeScript double-list workshop. Lunara i
 
 ## Delivery status
 
-- Production URL: **pending authenticated deployment to the user's Vercel and Railway accounts**.
-- GitHub URL: **pending authenticated repository creation/push**.
+- Production URL: **deployment to Vercel and Railway deferred by the user; no public application URL yet**.
+- GitHub repository: [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app).
 - Strict TypeScript and production build: verified locally.
 - Automated tests: run `npm test`; they include controlled Spotify responses, not a live Premium account.
 - Real Spotify streaming: implemented, but **not yet verified with a signed-in Premium account**.

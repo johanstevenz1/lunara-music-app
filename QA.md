@@ -24,6 +24,10 @@ Date: September 30, 2026 (America/Bogota).
 
 Only explicit test MP3s were used for local audio QA. They live in the chat's `work/` directory and are not part of the production source catalog.
 
+## Published source
+
+All 38 project files were published to the independent public repository [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app). A public Git fetch and content comparison confirmed that the remote implementation, tests and configuration match the locally verified source. No local environment file, token, dependency directory or QA audio fixture was published.
+
 ## Automated test boundaries
 
 Spotify OAuth, search API and SDK behavior are tested with controlled responses. These tests verify state transitions, URI/device forwarding and error handling; they do not prove real account authorization, DRM audio or cloud connectivity.
@@ -32,8 +36,7 @@ Spotify OAuth, search API and SDK behavior are tested with controlled responses.
 
 The live OAuth attempt reached Spotify's authorization endpoint with the supplied Client ID, S256 challenge and requested scopes. Spotify returned `redirect_uri: Not matching configuration` for `http://127.0.0.1:43730/callback`. That exact callback must be registered before the local Premium-account test can proceed.
 
-- GitHub repository creation/push.
-- Vercel frontend deployment and Railway backend deployment.
+- Vercel frontend deployment and Railway backend deployment, explicitly deferred by the user.
 - Exact production URL and HTTPS verification.
 - Spotify Developer Dashboard callback registration and test-user allowlist.
 - Real Spotify authentication, profile retrieval, arbitrary live searches and ready device.
