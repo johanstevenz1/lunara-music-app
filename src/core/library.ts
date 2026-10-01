@@ -30,6 +30,17 @@ export class Library {
   get tracks(): DoublyLinkedList<Track> {
     return this.active.value.tracks;
   }
+  /** Track identity belongs to its source, not to a newly generated node ID. */
+  findTrack(track: Track): ListNode<Track> | null {
+    const identity = track.source === 'spotify' ? track.uri : track.blobId;
+    if (!identity) return null;
+    for (const node of this.tracks) {
+      if (node.value.source !== track.source) continue;
+      const candidate = track.source === 'spotify' ? node.value.uri : node.value.blobId;
+      if (candidate === identity) return node;
+    }
+    return null;
+  }
   selectPlaylist(id: string): void {
     const playlist = this.playlists.find(id);
     if (!playlist) throw new Error('Playlist not found.');
