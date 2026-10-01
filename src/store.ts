@@ -1,11 +1,11 @@
-import { Library, type Track } from './core/library';
-import { DoublyLinkedList, type ListNode } from './core/list';
-import { Navigation } from './core/navigation';
-import { AuthService, type SpotifyUser } from './services/auth';
-import { SearchService } from './services/search';
-import { MusicPlayer, type PlaybackState } from './services/player';
-import { importAudio } from './services/importAudio';
-import { loadLibrary, saveLibrary } from './storage';
+import { Library, type Track } from './core/library.js';
+import { DoublyLinkedList, type ListNode } from './core/list.js';
+import { Navigation } from './core/navigation.js';
+import { AuthService, type SpotifyUser } from './services/auth.js';
+import { SearchService } from './services/search.js';
+import { MusicPlayer, type PlaybackState } from './services/player.js';
+import { importAudio } from './services/importAudio.js';
+import { loadLibrary, saveLibrary } from './storage.js';
 export type Page = 'home' | 'search' | 'library' | 'playlist';
 export type Placement = 'start' | 'end' | 'position';
 export class AppStore {
@@ -41,6 +41,63 @@ export class AppStore {
   private searchAbort: AbortController | null = null;
   private searchVersion = 0;
   private saveChain = Promise.resolve();
+  private duplicateBackup = new DoublyLinkedList<{ id: string; value: Track; position: number }>();
+  private cleanupPlaylistId = '';
+  get duplicateCount(): number {
+    let count = 0;
+    for (const node of this.library.tracks) {
+      const first = this.library.findTrack(node.value);
+      if (first && first !== node) count++;
+    }
+    return count;
+  }
+  get canUndoCleanup(): boolean {
+    return this.cleanupPlaylistId === this.library.active.id && !this.duplicateBackup.isEmpty();
+  }
+  private clearCleanup(): void {
+    this.duplicateBackup.clear();
+    this.cleanupPlaylistId = '';
+  }
+  removeDuplicates(): void {
+    if (this.busy) return;
+    this.clearCleanup();
+    this.cleanupPlaylistId = this.library.active.id;
+    const current = this.library.current;
+    let node = this.library.tracks.head;
+    let position = 0;
+    while (node) {
+      const next = node.next;
+      const first = this.library.findTrack(node.value);
+      const currentMatches =
+        first &&
+        current &&
+        current.value.source === node.value.source &&
+        (node.value.source === 'spotify'
+          ? current.value.uri === node.value.uri
+          : current.value.blobId === node.value.blobId);
+      const keep = currentMatches ? current : first;
+      if (keep && keep !== node) {
+        this.duplicateBackup.append({ id: node.id, value: node.value, position });
+        this.library.tracks.remove(node.id);
+      }
+      node = next;
+      position++;
+    }
+    this.navigation.reset();
+    this.notice = `Removed ${this.duplicateBackup.size} duplicate tracks. You can undo this cleanup.`;
+    this.save();
+    this.changed();
+  }
+  undoCleanup(): void {
+    if (this.busy || !this.canUndoCleanup) return;
+    for (const entry of this.duplicateBackup)
+      this.library.tracks.insertAt(entry.value.position, entry.value.value, entry.value.id);
+    this.clearCleanup();
+    this.navigation.reset();
+    this.notice = 'Duplicate cleanup undone';
+    this.save();
+    this.changed();
+  }
   subscribe = (listener: () => void): (() => void) => {
     const node = this.listeners.append(listener);
     return () => {
@@ -70,24 +127,9 @@ export class AppStore {
       const current = this.library.current;
       if (!current) return;
       const expected = current.value.uri ?? current.value.blobId;
-      if (state.uri !== expected) {
-        // Ignore stale SDK events during a command; reconcile external Spotify changes.
-        if (this.busy) return;
-        let match: ListNode<Track> | null = null;
-        for (const node of this.library.tracks)
-          if (node.value.uri === state.uri) {
-            match = node;
-            break;
-          }
-        if (match) this.navigation.selected(match);
-        else {
-          void this.player.pause().catch(() => {});
-          this.error = 'Playback changed outside this playlist. Select a song to continue.';
-          this.playback.paused = true;
-          this.changed();
-          return;
-        }
-      }
+      // API acceptance does not mean the SDK has finished changing tracks.
+      // A late event must never rewind the list cursor or pause the new song.
+      if (state.uri !== expected) return;
       this.playback = state;
       this.changed();
     };
@@ -167,6 +209,7 @@ export class AppStore {
     if (this.busy) return;
     if (id !== this.library.active.id) {
       await this.player.stop();
+      this.clearCleanup();
       this.library.selectPlaylist(id);
       this.position = 1;
       this.navigation.reset();
@@ -191,6 +234,7 @@ export class AppStore {
   }
   async deletePlaylist(): Promise<void> {
     await this.player.stop();
+    this.clearCleanup();
     this.library.playlists.remove(this.library.active.id);
     if (!this.library.playlists.head)
       this.library.playlists.append({ name: 'My playlist', tracks: new DoublyLinkedList() });
@@ -214,7 +258,14 @@ export class AppStore {
   }
   add(track: Track, queue = false): ListNode<Track> | null {
     try {
-      let index = this.insertionIndex();
+      const existing = this.library.findTrack(track);
+      if (existing && !queue) {
+        this.notice = `Already in ${this.library.active.value.name}`;
+        this.changed();
+        return existing;
+      }
+      this.clearCleanup();
+      let index = queue ? this.library.tracks.size : this.insertionIndex();
       if (queue && this.library.current) {
         index = 0;
         for (const node of this.library.tracks) {
@@ -222,7 +273,20 @@ export class AppStore {
           if (node === this.library.current) break;
         }
       } else if (queue) index = this.library.tracks.size;
-      const node = this.library.tracks.insertAt(index, { ...track });
+      let node: ListNode<Track>;
+      if (existing) {
+        // Queueing an existing song moves its node instead of copying it.
+        let oldIndex = 0;
+        for (const entry of this.library.tracks) {
+          if (entry === existing) break;
+          oldIndex++;
+        }
+        if (existing !== this.library.current) {
+          this.library.tracks.move(existing.id, oldIndex < index ? index - 1 : index);
+          this.navigation.reset();
+        }
+        node = existing;
+      } else node = this.library.tracks.insertAt(index, { ...track });
       this.notice = queue
         ? 'Added next in your queue'
         : `Added to ${this.library.active.value.name}`;
@@ -259,6 +323,7 @@ export class AppStore {
     const isCurrent = this.library.current?.id === id;
     const wasPlaying = !this.playback.paused;
     if (isCurrent) await this.player.stop();
+    this.clearCleanup();
     this.library.removeTrack(id);
     this.navigation.reset();
     if (isCurrent) {
@@ -271,6 +336,7 @@ export class AppStore {
   moveTrack(id: string, position: number): void {
     try {
       this.library.tracks.move(id, position - 1);
+      this.clearCleanup();
       this.changed();
       this.save();
     } catch {
@@ -284,20 +350,22 @@ export class AppStore {
     this.busy = true;
     this.error = '';
     this.library.current = node;
+    const oldPlayback = this.playback;
+    this.playback = {
+      paused: true,
+      position: 0,
+      duration: node.value.durationMs,
+      uri: node.value.uri ?? node.value.blobId!,
+    };
     this.changed();
     try {
       await this.player.play(node.value);
       if (intentional) this.navigation.selected(node);
-      this.playback = {
-        paused: false,
-        position: 0,
-        duration: node.value.durationMs,
-        uri: node.value.uri ?? node.value.blobId!,
-      };
+      // Keep the actual SDK/Audio state; /play acceptance is not proof of audio.
     } catch (error) {
       this.library.current = previous;
       this.navigation.reset();
-      this.playback.paused = true;
+      this.playback = { ...oldPlayback, paused: true };
       this.fail(error);
     } finally {
       this.busy = false;
@@ -306,6 +374,7 @@ export class AppStore {
   }
   async playResult(track: Track): Promise<void> {
     this.player.activate();
+    if (this.busy) return;
     const node = this.add(track);
     if (node) await this.playNode(node, true);
   }
@@ -341,6 +410,7 @@ export class AppStore {
   }
   async previous(): Promise<void> {
     this.player.activate();
+    if (this.busy) return;
     const node = this.navigation.previous();
     if (node) await this.playNode(node);
   }

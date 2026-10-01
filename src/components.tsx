@@ -306,6 +306,7 @@ export function TrackRows({
     <div className="track-list">
       {renderNodes(list, (node, index) => {
         const current = !search && store.library.current === node;
+        const added = search && store.library.findTrack(node.value) !== null;
         return (
           <div key={node.id} className={`track-row ${current ? 'playing' : ''}`}>
             <span className="track-index">
@@ -334,15 +335,22 @@ export function TrackRows({
             {search ? (
               <>
                 <IconButton
-                  label={`Add ${node.value.title} to playlist`}
+                  label={
+                    added
+                      ? `${node.value.title} is already in playlist`
+                      : `Add ${node.value.title} to playlist`
+                  }
+                  active={added}
+                  disabled={added || store.busy}
                   onClick={() => {
                     store.add(node.value);
                   }}
                 >
-                  <Plus />
+                  {added ? <Check /> : <Plus />}
                 </IconButton>
                 <IconButton
                   label={`Queue ${node.value.title} next`}
+                  disabled={store.busy}
                   onClick={() => {
                     store.add(node.value, true);
                   }}

@@ -367,6 +367,24 @@ export default function App() {
                     </IconButton>
                   </div>
                   <div className="action-group">
+                    {store.duplicateCount > 0 && (
+                      <button
+                        className="secondary-button"
+                        disabled={store.busy}
+                        onClick={() => store.removeDuplicates()}
+                      >
+                        Remove duplicates ({store.duplicateCount})
+                      </button>
+                    )}
+                    {store.canUndoCleanup && (
+                      <button
+                        className="text-button"
+                        disabled={store.busy}
+                        onClick={() => store.undoCleanup()}
+                      >
+                        Undo cleanup
+                      </button>
+                    )}
                     <button
                       className="secondary-button"
                       onClick={() => fileInput.current?.click()}
