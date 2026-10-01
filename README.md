@@ -8,7 +8,8 @@ A responsive music application for the TypeScript double-list workshop. Lunara i
 - GitHub repository: [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app).
 - Strict TypeScript and production build: verified locally.
 - Automated tests: run `npm test`; they include controlled Spotify responses, not a live Premium account.
-- Real Spotify streaming: implemented, but **not yet verified with a signed-in Premium account**.
+- Spotify OAuth, profile, live search and SDK readiness: verified with the authorized account.
+- Real Spotify streaming: implemented; **sustained audio is not yet verified in Lunara**. The SDK reports a generic playback error in the embedded test browser; see `QA.md`.
 - See `QA.md` for the exact checks performed and `DEPLOYMENT.md` for cloud configuration.
 
 ## Features
@@ -16,6 +17,7 @@ A responsive music application for the TypeScript double-list workshop. Lunara i
 - Original generic doubly linked list with head, tail, current, size, and real bidirectional links.
 - Create, rename, open, and delete personal playlists.
 - Insert at beginning/end or a user-selected position; remove and reorder tracks.
+- Adding or playing an existing search result reuses its linked node. Queueing it moves the same node. Legacy duplicates can be cleaned up with Undo.
 - Spotify OAuth Authorization Code with PKCE, CSRF state verification, expiry handling, refresh deduplication, and logout.
 - Spotify profile, arbitrary song/artist/album search, artwork, title, artist, album, and duration.
 - Debounced search, cancellation, short-lived bounded caching, and clear loading/empty/error states.
@@ -84,6 +86,8 @@ Normal next/previous are O(1). Finding a node is O(n); indexed lookup starts fro
 7. A user click activates the audio element; playback sends the selected node's real URI to `/me/player/play?device_id=...`.
 8. SDK events and `getCurrentState()` update progress. A one-second poll reads actual SDK state; it does not manufacture elapsed playback.
 9. Shuffle and repeat choose application nodes and send their URIs to Spotify. They do not replace the domain structure with Spotify's native queue.
+
+Playback requests wait for the matching, unpaused SDK track rather than assuming HTTP 204 means the song is playing. Late events for an old URI and polls started before a transition are ignored. Failed transitions unlock the controls and restore the previous cursor. Chromium browsers are checked for protected-audio capability before connecting the SDK; passing this check alone does not prove successful streaming.
 
 Scopes: `streaming user-read-private user-read-email user-modify-playback-state user-read-playback-state`.
 
@@ -158,13 +162,13 @@ npm test
 npm run build
 ```
 
-Tests cover list operations and bidirectional invariants; current-node removal; linked snapshot restoration; shuffle history/repeat; PKCE challenge/state validation/token refresh; device-targeted SDK commands/state/seek/volume/end detection; API origin checks, request validation and sanitized rate-limit errors.
+Tests cover list operations and bidirectional invariants; current-node removal; linked snapshot restoration; shuffle history/repeat; PKCE challenge/state validation/token refresh; device-targeted SDK commands/state/seek/volume/end detection; API origin checks, request validation and sanitized rate-limit errors. Regression tests exercise repeated Add/Play, existing-track queue moves, late SDK events and polling results, failed Next, protected-audio failure, and reversible duplicate cleanup.
 
 To demonstrate the workshop: connect Spotify, create a playlist, search and add three songs using each insertion mode, open Developer View, press Next/Previous, reorder and remove the current song, inspect the queue, then show shuffle/repeat. Import an owned MP3 as a secondary source and navigate between the Spotify and local nodes. Verify the production URL in a clean browser before presenting.
 
 ## Known limitations
 
-- Live Spotify search/playback still needs the user's dashboard configuration and a real authorized Premium session. Unit mocks are not evidence of live streaming.
+- Local OAuth, profile, search and a ready SDK device have been verified. Sustained Lunara streaming and Next/Previous with live audio still require verification in an external supported browser. The generic SDK error observed in the embedded browser does not identify its cause; the official Spotify web player advanced in that same browser. Unit mocks are not evidence of live streaming.
 - The app's playlists and MP3s are browser-local, not cloud-synchronized and not exported into Spotify's own playlists. Another browser/device has its own library.
 - MP3 tags use the original ID3v1 parser; files with only newer ID3 tags fall back to the filename.
 - MP3 import is limited to 50 MB per file and browser storage availability. Clearing site data removes local songs/playlists.

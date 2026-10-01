@@ -6,7 +6,7 @@ Date: September 30, 2026 (America/Bogota).
 
 - Dependencies installed from npm with lockfile; initial install reported no vulnerabilities.
 - Strict TypeScript check and production frontend/backend build passed.
-- 15 automated tests passed at the recorded run; see `npm test` for current output.
+- 22 automated tests passed at the recorded run; see `npm test` for current output.
 - Actual compiled frontend and Node API were started and inspected in the browser.
 - Browser playlist creation and deletion were exercised in Lunara's independent storage namespace, including a second disposable QA playlist.
 - Local MP3 import decoded an 8-second generated test fixture, parsed ID3v1 title/artist/album, and displayed actual duration.
@@ -17,7 +17,7 @@ Date: September 30, 2026 (America/Bogota).
 - Removing the current node stopped its audio, selected the next neighbor and updated all pointers and size.
 - Playlist renaming was verified in the sidebar and main heading.
 - The queue displayed the active list's upcoming nodes and updated after playlist changes.
-- No errors or warnings were present in the captured browser console logs.
+- Initial local MP3 QA had no captured console errors; the later live Spotify SDK test reported playback warnings, described below.
 - Browser reload restored playlist metadata and MP3 references from IndexedDB.
 - Mobile playlist and circular now-playing screen inspected at 390 × 844. The document had no horizontal overflow at that width.
 - Desktop design inspected with original Lunara identity; no existing Auralis project was modified.
@@ -26,7 +26,24 @@ Only explicit test MP3s were used for local audio QA. They live in the chat's `w
 
 ## Published source
 
-All 38 project files were published to the independent public repository [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app). A public Git fetch and content comparison confirmed that the remote implementation, tests and configuration match the locally verified source. No local environment file, token, dependency directory or QA audio fixture was published.
+Project source is published to the independent public repository [johanstevenz1/lunara-music-app](https://github.com/johanstevenz1/lunara-music-app). No local environment file, token, dependency directory or QA audio fixture is included in the source delivery.
+
+## Duplicate and playback regression fixes
+
+- Repeated Add and Play of a Spotify search result now reuse one node identified by source URI; Queue next moves an existing node rather than duplicating it.
+- The browser's existing Workshop playlist was cleaned from four nodes to two distinct tracks. Undo restored all four in their original order; cleanup was then reapplied.
+- The search UI marks existing songs as added and disables the Add action.
+- Delayed SDK events for the old URI cannot rewind the current node or pause the requested track. Polls begun before a track change cannot overwrite newer state.
+- HTTP 204 is no longer treated as successful audio. Play waits for a matching unpaused SDK state; failures restore the cursor and unlock controls.
+- Controlled tests cover these transitions, duplicate cleanup while a duplicate is current, exact order restoration, and unsupported protected audio.
+
+## Live Spotify verification
+
+The development callback is now registered. Authorization Code with PKCE completed, profile retrieval succeeded, arbitrary Spotify searches returned real results, and the SDK reported a ready Lunara device.
+
+Lunara's SDK emitted repeated generic `playback_error` messages for Basket Case and Sin Tu Amor in the Codex embedded browser. Chromium protected-media capability detection passed; this does **not** establish that protected streaming works inside the SDK iframe. The official Spotify web player in the same browser was able to select its own device and advance Basket Case's position beyond 20 seconds. This contrast does not establish a DRM, account, track or network cause for the SDK error.
+
+Sustained audio and real Next/Previous transitions in Lunara remain unverified. Test the app in a current external Chrome, Edge, Firefox or Safari browser with a ready Spotify device. Do not describe the controlled SDK tests as proof of audible streaming.
 
 ## Automated test boundaries
 
@@ -34,12 +51,9 @@ Spotify OAuth, search API and SDK behavior are tested with controlled responses.
 
 ## Still requiring external access
 
-The live OAuth attempt reached Spotify's authorization endpoint with the supplied Client ID, S256 challenge and requested scopes. Spotify returned `redirect_uri: Not matching configuration` for `http://127.0.0.1:43730/callback`. That exact callback must be registered before the local Premium-account test can proceed.
-
 - Vercel frontend deployment and Railway backend deployment, explicitly deferred by the user.
 - Exact production URL and HTTPS verification.
-- Spotify Developer Dashboard callback registration and test-user allowlist.
-- Real Spotify authentication, profile retrieval, arbitrary live searches and ready device.
+- Production callback registration and professor/test-account allowlist.
 - Audible Premium streaming and full production playback checks.
 - Production testing in a clean browser session.
 
