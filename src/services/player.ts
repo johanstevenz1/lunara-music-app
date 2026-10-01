@@ -47,6 +47,14 @@ export class MusicPlayer {
   private generation = 0;
   private volume = 0.65;
   private prepared = false;
+  private activation: Promise<void> = Promise.resolve();
+  private pendingPlay: {
+    generation: number;
+    accepted: boolean;
+    resolve: () => void;
+    reject: (error: Error) => void;
+    timer?: number;
+  } | null = null;
   onState: (state: PlaybackState) => void = () => {};
   onEnded: () => void = () => {};
   onError: (message: string) => void = () => {};
@@ -64,9 +72,12 @@ export class MusicPlayer {
     window.setInterval(() => {
       if (!this.sdk || this.active?.source !== 'spotify' || this.polling) return;
       this.polling = true;
+      const generation = this.generation;
       void this.sdk
         .getCurrentState()
-        .then((state) => this.spotifyState(state))
+        .then((state) => {
+          if (generation === this.generation) this.spotifyState(state);
+        })
         .catch(() => {})
         .finally(() => {
           this.polling = false;
@@ -77,6 +88,28 @@ export class MusicPlayer {
     if (this.sdk && this.deviceId) return;
     if (this.sdk) this.sdk.disconnect();
     this.prepared = false;
+    // Embedded Chromium can expose a Connect device without a usable DRM module.
+    // Check capability rather than claiming the browser can stream protected audio.
+    if (typeof navigator !== 'undefined' && /Chrome|Chromium|Edg\//.test(navigator.userAgent)) {
+      let protectedAudio = false;
+      try {
+        await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [
+          {
+            initDataTypes: ['cenc'],
+            audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }],
+          },
+        ]);
+        protectedAudio = true;
+      } catch {
+        // A web app cannot install or bypass a browser's protected media module.
+      }
+      if (!protectedAudio) {
+        this.onReady(false);
+        throw new Error(
+          'This browser cannot play Spotify protected audio. Open Lunara in Chrome or Edge with protected content enabled. Spotify search and your playlists still work here.',
+        );
+      }
+    }
     if (!window.Spotify)
       await new Promise<void>((resolve, reject) => {
         const timer = window.setTimeout(
@@ -109,11 +142,14 @@ export class MusicPlayer {
       },
     });
     this.sdk.addListener('ready', (data: { device_id: string }) => {
+      if (data.device_id !== this.deviceId) this.prepared = false;
       this.deviceId = data.device_id;
       this.onReady(true);
     });
     this.sdk.addListener('not_ready', () => {
       this.deviceId = '';
+      this.prepared = false;
+      this.rejectPendingPlay(new Error('Lunara is offline. Reconnect the player.'));
       this.onReady(false);
       this.onError('Lunara is offline. Reconnect the player.');
     });
@@ -134,14 +170,32 @@ export class MusicPlayer {
     this.sdk.addListener('account_error', () =>
       this.onError('Spotify playback needs a Premium account authorized for this app.'),
     );
-    this.sdk.addListener('playback_error', () =>
-      this.onError('Spotify cannot play this track. Try another song.'),
-    );
+    this.sdk.addListener('playback_error', (data: { message: string }) => {
+      const diagnostic = data.message
+        .replace(/https?:\/\/\S+/gi, '[Spotify service]')
+        .replace(/bearer\s+\S+/gi, '[redacted]')
+        .replace(/\b(?:access_token|refresh_token|token)\s*[:=]\s*\S+/gi, '[redacted]')
+        .slice(0, 200);
+      console.warn('[Lunara Spotify playback]', diagnostic);
+      const message =
+        /drm|widevine|protected|decrypt|license|\bcdm\b|\beme\b|browser.*support/i.test(
+          data.message,
+        )
+          ? 'This browser cannot play Spotify protected audio. Open Lunara in Chrome or Edge.'
+          : 'Spotify playback failed. Reconnect the player and try again. If it continues, open Lunara in Chrome or Edge and check playback in Spotify.';
+      this.rejectPendingPlay(new Error(message));
+      this.onError(message);
+    });
     if (!(await this.sdk.connect()))
       throw new Error('Spotify player could not connect. Please try again.');
   }
   private spotifyState(state: SDKState | null): void {
     if (!state || this.active?.source !== 'spotify') return;
+    // Spotify can deliver the old URI after /play has already returned 204.
+    // Only the requested track can update the cursor, progress or completion.
+    if (state.track_window.current_track.uri !== this.active.uri) return;
+    // A restart of the same URI may briefly report the previous play's final position.
+    if (this.pendingPlay && state.position > 5000) return;
     const next: PlaybackState = {
       paused: state.paused,
       position: state.position,
@@ -150,6 +204,7 @@ export class MusicPlayer {
     };
     // Spotify signals completion by resetting position to zero while paused.
     const ended =
+      !this.pendingPlay &&
       this.previous &&
       !this.previous.paused &&
       next.paused &&
@@ -159,7 +214,24 @@ export class MusicPlayer {
       next.uri === this.previous.uri;
     this.previous = next;
     this.onState(next);
+    if (
+      !next.paused &&
+      this.pendingPlay?.accepted &&
+      this.pendingPlay.generation === this.generation
+    ) {
+      const pending = this.pendingPlay;
+      this.pendingPlay = null;
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      pending.resolve();
+    }
     if (ended) this.onEnded();
+  }
+  private rejectPendingPlay(error: Error): void {
+    const pending = this.pendingPlay;
+    if (!pending) return;
+    this.pendingPlay = null;
+    if (pending.timer !== undefined) clearTimeout(pending.timer);
+    pending.reject(error);
   }
   private localState(): void {
     if (this.active?.source !== 'local') return;
@@ -172,27 +244,59 @@ export class MusicPlayer {
   }
   /** Call immediately inside a click handler to retain the browser user gesture. */
   activate(): void {
-    if (this.sdk) void this.sdk.activateElement().catch(() => {});
+    if (this.sdk) this.activation = this.sdk.activateElement().catch(() => {});
   }
   async play(track: Track): Promise<void> {
+    this.rejectPendingPlay(new Error('Playback was replaced by another song.'));
     const generation = ++this.generation;
     if (track.source === 'spotify') {
       if (!this.auth.connected) throw new Error('Connect Spotify to play this song.');
       if (!this.sdk || !this.deviceId)
         throw new Error('The Spotify player is starting. Wait for Player ready, then press Play.');
-      this.audio.pause();
+      if (!track.uri) throw new Error('This song has no Spotify playback URI.');
+      const previousTrack = this.active;
       this.active = track;
       this.previous = null;
-      await this.auth.request('/api/play', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uri: track.uri,
-          deviceId: this.deviceId,
-          resetModes: !this.prepared,
-        }),
+      this.audio.pause();
+      const confirmation = new Promise<void>((resolve, reject) => {
+        this.pendingPlay = { generation, accepted: false, resolve, reject };
       });
-      this.prepared = true;
+      // Register a handler immediately: an SDK error may arrive during the API call.
+      void confirmation.catch(() => {});
+      try {
+        await this.activation;
+        await this.auth.request('/api/play', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            uri: track.uri,
+            deviceId: this.deviceId,
+            resetModes: !this.prepared,
+          }),
+        });
+        if (generation !== this.generation) return;
+        this.prepared = true;
+        if (this.pendingPlay?.generation === generation) {
+          this.pendingPlay.accepted = true;
+          this.pendingPlay.timer = window.setTimeout(() => {
+            this.rejectPendingPlay(
+              new Error(
+                'Spotify did not start this song. Press Play to retry, or choose another track.',
+              ),
+            );
+          }, 12000);
+          const state = await this.sdk.getCurrentState().catch(() => null);
+          if (generation === this.generation) this.spotifyState(state);
+        }
+        await confirmation;
+      } catch (error) {
+        this.rejectPendingPlay(error instanceof Error ? error : new Error('Playback failed.'));
+        if (generation === this.generation) {
+          this.active = previousTrack;
+          this.previous = null;
+        }
+        throw error;
+      }
     } else {
       await this.sdk?.pause();
       const blob = await loadAudio(track.blobId!);
@@ -221,6 +325,7 @@ export class MusicPlayer {
     }
   }
   async pause(): Promise<void> {
+    this.previous = null;
     this.audio.pause();
     await this.sdk?.pause();
   }
@@ -236,11 +341,13 @@ export class MusicPlayer {
   }
   async stop(): Promise<void> {
     ++this.generation;
+    this.rejectPendingPlay(new Error('Playback was stopped.'));
     await this.pause();
     this.active = null;
     this.previous = null;
   }
   disconnect(): void {
+    this.rejectPendingPlay(new Error('Spotify was disconnected. Please connect again.'));
     this.sdk?.disconnect();
     this.sdk = null;
     this.deviceId = '';

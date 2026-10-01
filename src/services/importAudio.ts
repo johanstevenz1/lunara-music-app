@@ -1,5 +1,5 @@
-import type { Track } from '../core/library';
-import { saveAudio } from '../storage';
+import type { Track } from '../core/library.js';
+import { saveAudio } from '../storage.js';
 export async function importAudio(file: File): Promise<Track> {
   if (!file.name.toLowerCase().endsWith('.mp3')) throw new Error('Choose an MP3 audio file.');
   if (file.size > 50 * 1024 * 1024) throw new Error('Choose an MP3 smaller than 50 MB.');
