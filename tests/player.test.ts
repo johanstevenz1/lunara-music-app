@@ -36,7 +36,14 @@ test('SDK playback uses the node URI, actual state, seek, volume and completion'
     }
     async activateElement() {}
     async getCurrentState() {
-      return null;
+      return playedUri
+        ? {
+            paused: false,
+            position: 0,
+            duration: 10000,
+            track_window: { current_track: { uri: playedUri } },
+          }
+        : null;
     }
   }
   class MockAudio {
@@ -45,7 +52,7 @@ test('SDK playback uses the node URI, actual state, seek, volume and completion'
   }
   Object.defineProperty(globalThis, 'window', {
     configurable: true,
-    value: { Spotify: { Player: MockSDK }, setInterval: () => 0 },
+    value: { Spotify: { Player: MockSDK }, setInterval: () => 0, setTimeout },
   });
   Object.defineProperty(globalThis, 'Audio', { configurable: true, value: MockAudio });
   const auth = new AuthService('a'.repeat(32));
